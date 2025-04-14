@@ -22,8 +22,6 @@ pub enum TextAlign {
     Center,
     /// Right align text
     Right,
-    /// Justified text
-    Justify,
 }
 
 impl Default for TextAlign {

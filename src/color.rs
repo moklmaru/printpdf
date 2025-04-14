@@ -262,8 +262,8 @@ pub struct SpotColor {
 
 impl SpotColor {
     /// Creates a new SpotColor, NOTE: SpotColor has to be 0.0 - 1.0, not 0 - 255!
-    pub fn new(name: String, screen: f32, c: f32, m: f32, y: f32, k: f32) -> Self {
-        Self { name, screen, c, m, y, k }
+    pub fn new(name: &str, screen: f32, c: f32, m: f32, y: f32, k: f32) -> Self {
+        Self { name: name.to_string(), screen, c, m, y, k }
     }
 
     /// Checks whether the color will be out of range (0.0 - 1.0)

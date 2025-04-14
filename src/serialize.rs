@@ -289,17 +289,41 @@ pub fn serialize_pdf<W: Write>(
                     spot_colors.push(color.clone());
                 }
             }
-            page_resources.set(
-                "ColorSpace",
-                LoDictionary::from_iter(
-                    spot_colors
-                        .iter()
-                        .map(|spot| {
-                            let name = format!("/{}", spot.name);
-                            (name, Reference(todo!()))
-                        })
-                ),
-            );
+            let mut color_space_dict = LoDictionary::new();
+            for spot in &spot_colors {
+                let pdf_spot_name = spot.name.replace(" ", "_");
+
+                // Tint Transform Function (Type 4 PostScript Calculator)
+                let function_string = format!(
+                    // { tint c mul m mul y mul k mul } - stack order matters
+                    "{{ dup {} mul exch dup {} mul exch dup {} mul exch {} mul }}",
+                    spot.c, spot.m, spot.y, spot.k
+                );
+                let function_dict = LoDictionary::from_iter(vec![
+                    ("FunctionType", Integer(4)),
+                    ("Domain", Array(vec![Real(0.0), Real(1.0)])),
+                    ("Range", Array(vec![
+                        Real(0.0), Real(1.0), Real(0.0), Real(1.0),
+                        Real(0.0), Real(1.0), Real(0.0), Real(1.0),
+                    ])),
+                ]);
+                let tint_transform_stream = LoStream::new(function_dict, function_string.into_bytes());
+                let tint_transform_ref = doc.add_object(tint_transform_stream);
+
+                // Separation Color Space Array
+                let separation_space = Array(vec![
+                    Name("Separation".into()),
+                    Name(pdf_spot_name.clone().into()), // The name of the spot color
+                    Name("DeviceCMYK".into()),          // Alternate color space
+                    Reference(tint_transform_ref),      // Tint transform function
+                ]);
+                let separation_ref = doc.add_object(separation_space);
+
+                color_space_dict.set(pdf_spot_name, Reference(separation_ref));
+            }
+            if !color_space_dict.is_empty() {
+                page_resources.set("ColorSpace", Dictionary(color_space_dict));
+            }
 
             page_resources.set("Font", Reference(global_font_dict_id));
             page_resources.set("XObject", Reference(global_xobject_dict_id));
@@ -583,8 +607,8 @@ pub(crate) fn translate_operations(
             Op::SetFillColor { col } => {
                 match &col {
                     Color::SpotColor(spot) => {
-                        let name = format!("/{}", spot.name);
-                        content.push(LoOp::new("cs", vec![Name(name.into())]));
+                        let pdf_spot_name = spot.name.replace(" ", "_");
+                        content.push(LoOp::new("cs", vec![Name(pdf_spot_name.into())]));
                         content.push(LoOp::new("scn", vec![Real(spot.screen)]));
                     }
                     _ => {
@@ -609,22 +633,32 @@ pub(crate) fn translate_operations(
                 }
             }
             Op::SetOutlineColor { col } => {
-                let ci = match &col {
-                    Color::Rgb(_) => "RG",
-                    Color::Cmyk(_) | Color::SpotColor(_) => "K",
-                    Color::Greyscale(_) => "G",
-                };
-                if col.is_out_of_range() {
-                    warnings.push(PdfWarnMsg::error(
-                        0,
-                        0,
-                        format!(
-                            "PDF color {col:?} is out of range, must be normalized to 0.0 - 1.0"
-                        ),
-                    ));
+                match &col {
+                    Color::SpotColor(spot) => {
+                        let pdf_spot_name = spot.name.replace(" ", "_");
+                        content.push(LoOp::new("CS", vec![Name(pdf_spot_name.into())]));
+                        content.push(LoOp::new("SCN", vec![Real(spot.screen)]));
+                    }
+                    _ => {
+                        let ci = match &col {
+                            Color::Rgb(_) => "RG",
+                            Color::Cmyk(_) => "K",
+                            Color::Greyscale(_) => "G",
+                            Color::SpotColor(_) => unreachable!()
+                        };
+                        if col.is_out_of_range() {
+                            warnings.push(PdfWarnMsg::error(
+                                0,
+                                0,
+                                format!(
+                                    "PDF color {col:?} is out of range, must be normalized to 0.0 - 1.0"
+                                ),
+                            ));
+                        }
+                        let cvec = col.into_vec().into_iter().map(Real).collect();
+                        content.push(LoOp::new(ci, cvec));
+                    }
                 }
-                let cvec = col.into_vec().into_iter().map(Real).collect();
-                content.push(LoOp::new(ci, cvec));
             }
             Op::SetOutlineThickness { pt } => {
                 content.push(LoOp::new("w", vec![Real(pt.0)]));
