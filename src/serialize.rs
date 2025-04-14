@@ -16,7 +16,7 @@ use crate::{
     color::IccProfile, font::SubsetFont, Actions, BuiltinFont, Color, ColorArray, Destination,
     FontId, IccProfileType, ImageOptimizationOptions, Line, LinkAnnotation, Op, PaintMode,
     ParsedFont, PdfDocument, PdfDocumentInfo, PdfPage, PdfResources, PdfWarnMsg, Polygon, PrepFont,
-    TextItem, XObject, XObjectId,
+    TextItem, XObject, XObjectId, SpotColor
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, PartialOrd)]
@@ -272,6 +272,32 @@ pub fn serialize_pdf<W: Write>(
                         .iter()
                         .map(|l| Dictionary(link_annotation_to_dict(l, &page_ids_reserved)))
                         .collect(),
+                ),
+            );
+
+            // Gather spot colors
+            let mut spot_colors: Vec<SpotColor> = Vec::new();
+            for op in page.ops.iter() {
+                let color: SpotColor = match op {
+                    Op::SetFillColor { col } | Op::SetOutlineColor { col } => match col {
+                        Color::SpotColor(spot) => spot.clone(),
+                        _ => continue
+                    },
+                    _ => continue
+                };
+                if !spot_colors.iter().any(|x| x.name == color.name) {
+                    spot_colors.push(color.clone());
+                }
+            }
+            page_resources.set(
+                "ColorSpace",
+                LoDictionary::from_iter(
+                    spot_colors
+                        .iter()
+                        .map(|spot| {
+                            let name = format!("/{}", spot.name);
+                            (name, Reference(todo!()))
+                        })
                 ),
             );
 
@@ -555,23 +581,32 @@ pub(crate) fn translate_operations(
                 content.push(LoOp::new("Td", vec![pos.x.0.into(), pos.y.0.into()]));
             }
             Op::SetFillColor { col } => {
-                let ci = match &col {
-                    Color::Rgb(_) => "rg",
-                    Color::Cmyk(_) | Color::SpotColor(_) => "k",
-                    Color::Greyscale(_) => "g",
-                };
-
-                if col.is_out_of_range() {
-                    warnings.push(PdfWarnMsg::error(
-                        0,
-                        0,
-                        format!(
-                            "PDF color {col:?} is out of range, must be normalized to 0.0 - 1.0"
-                        ),
-                    ));
+                match &col {
+                    Color::SpotColor(spot) => {
+                        let name = format!("/{}", spot.name);
+                        content.push(LoOp::new("cs", vec![Name(name.into())]));
+                        content.push(LoOp::new("scn", vec![Real(spot.screen)]));
+                    }
+                    _ => {
+                        let ci = match &col {
+                            Color::Rgb(_) => "rg",
+                            Color::Cmyk(_) | Color::SpotColor(_) => "k",
+                            Color::Greyscale(_) => "g",
+                        };
+        
+                        if col.is_out_of_range() {
+                            warnings.push(PdfWarnMsg::error(
+                                0,
+                                0,
+                                format!(
+                                    "PDF color {col:?} is out of range, must be normalized to 0.0 - 1.0"
+                                ),
+                            ));
+                        }
+                        let cvec = col.into_vec().into_iter().map(Real).collect();
+                        content.push(LoOp::new(ci, cvec));
+                    }
                 }
-                let cvec = col.into_vec().into_iter().map(Real).collect();
-                content.push(LoOp::new(ci, cvec));
             }
             Op::SetOutlineColor { col } => {
                 let ci = match &col {

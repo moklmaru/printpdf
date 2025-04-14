@@ -249,9 +249,11 @@ impl Greyscale {
 
 /// Spot colors are like Cmyk, but without color space. They are essentially "named" colors
 /// from specific vendors - currently they are the same as a CMYK color.
-#[derive(Debug, Copy, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SpotColor {
+    pub name: String,
+    pub screen: f32,
     pub c: f32,
     pub m: f32,
     pub y: f32,
@@ -260,8 +262,8 @@ pub struct SpotColor {
 
 impl SpotColor {
     /// Creates a new SpotColor, NOTE: SpotColor has to be 0.0 - 1.0, not 0 - 255!
-    pub fn new(c: f32, m: f32, y: f32, k: f32) -> Self {
-        Self { c, m, y, k }
+    pub fn new(name: String, screen: f32, c: f32, m: f32, y: f32, k: f32) -> Self {
+        Self { name, screen, c, m, y, k }
     }
 
     /// Checks whether the color will be out of range (0.0 - 1.0)
