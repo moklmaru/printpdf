@@ -313,7 +313,7 @@ pub fn serialize_pdf<W: Write>(
                 // Separation Color Space Array
                 let separation_space = Array(vec![
                     Name("Separation".into()),
-                    Name(pdf_spot_name.clone().into()), // The name of the spot color
+                    Name(spot.name.clone().into()), // The name of the spot color
                     Name("DeviceCMYK".into()),          // Alternate color space
                     Reference(tint_transform_ref),      // Tint transform function
                 ]);
